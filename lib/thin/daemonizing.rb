@@ -16,7 +16,7 @@ end
 module Thin
   # Raised when the pid file already exist starting as a daemon.
   class PidFileExist < RuntimeError; end
-  
+
   # Module included in classes that can be turned into a daemon.
   # Handle stuff like:
   # * storing the PID in a file
@@ -25,35 +25,35 @@ module Thin
   # * killing the process gracefully
   module Daemonizable
     attr_accessor :pid_file, :log_file
-    
+
     def self.included(base)
       base.extend ClassMethods
     end
-    
+
     def pid
-      File.exist?(pid_file) ? open(pid_file).read.to_i : nil
+      File.exist?(pid_file) && !File.zero?(pid_file) ? open(pid_file).read.to_i : nil
     end
-    
+
     # Turns the current script into a daemon process that detaches from the console.
     def daemonize
       raise PlatformNotSupported, 'Daemonizing is not supported on Windows'     if Thin.win?
       raise ArgumentError,        'You must specify a pid_file to daemonize' unless @pid_file
-      
+
       remove_stale_pid_file
-      
+
       pwd = Dir.pwd # Current directory is changed during daemonization, so store it
-      
+
       # HACK we need to create the directory before daemonization to prevent a bug under 1.9
       #      ignoring all signals when the directory is created after daemonization.
       FileUtils.mkdir_p File.dirname(@pid_file)
       FileUtils.mkdir_p File.dirname(@log_file)
-      
+
       Daemonize.daemonize(File.expand_path(@log_file), name)
-      
+
       Dir.chdir(pwd)
-      
+
       write_pid_file
-      
+
       at_exit do
         log ">> Exiting!"
         remove_pid_file
@@ -64,7 +64,7 @@ module Thin
     # to the specified user and group.
     def change_privilege(user, group=user)
       log ">> Changing process privilege to #{user}:#{group}"
-      
+
       uid, gid = Process.euid, Process.egid
       target_uid = Etc.getpwnam(user).uid
       target_gid = Etc.getgrnam(group).gid
@@ -78,12 +78,12 @@ module Thin
     rescue Errno::EPERM => e
       log "Couldn't change user and group to #{user}:#{group}: #{e}"
     end
-    
+
     # Register a proc to be called to restart the server.
     def on_restart(&block)
       @on_restart = block
     end
-    
+
     # Restart the server.
     def restart
       if @on_restart
@@ -94,7 +94,7 @@ module Thin
         exit!
       end
     end
-    
+
     module ClassMethods
       # Send a QUIT or INT (if timeout is +0+) signal the process which
       # PID is stored in +pid_file+.
@@ -107,12 +107,12 @@ module Thin
           send_signal('QUIT', pid_file, timeout)
         end
       end
-      
+
       # Restart the server by sending HUP signal.
       def restart(pid_file)
         send_signal('HUP', pid_file)
       end
-      
+
       # Send a +signal+ to the process which PID is stored in +pid_file+.
       def send_signal(signal, pid_file, timeout=60)
         if pid = read_pid_file(pid_file)
@@ -133,7 +133,7 @@ module Thin
         Logging.log "process not found!"
         force_kill pid_file
       end
-      
+
       def force_kill(pid_file)
         if pid = read_pid_file(pid_file)
           Logging.log "Sending KILL signal to process #{pid} ... "
@@ -143,27 +143,27 @@ module Thin
           Logging.log "Can't stop process, no PID found in #{pid_file}"
         end
       end
-      
+
       def read_pid_file(file)
-        if File.file?(file) && pid = File.read(file)
+        if File.file?(file) && !File.zero?(file) && pid = File.read(file)
           pid.to_i
         else
           nil
         end
       end
     end
-    
+
     protected
       def remove_pid_file
         File.delete(@pid_file) if @pid_file && File.exists?(@pid_file)
       end
-    
+
       def write_pid_file
         log ">> Writing PID to #{@pid_file}"
         open(@pid_file,"w") { |f| f.write(Process.pid) }
         File.chmod(0644, @pid_file)
       end
-      
+
       # If PID file is stale, remove it.
       def remove_stale_pid_file
         if File.exist?(@pid_file)
